@@ -1,0 +1,64 @@
+{
+  "name": "dsh-workspace-folders",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: give each workspace additional working directories, like Claude's additional directories.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "Fleey",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Fleey/dsh-workspace-folders.git"
+  },
+  "homepage": "https://github.com/Fleey/dsh-workspace-folders#readme",
+  "bugs": {
+    "url": "https://github.com/Fleey/dsh-workspace-folders/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "workspace",
+    "directories"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-alpha.5 <0.3.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.0"
+  }
+}

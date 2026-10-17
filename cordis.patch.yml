@@ -1,0 +1,16 @@
+# dsh-workspace-folders bundle layer.
+#
+# Additional directories are chosen per workspace from the composer's folder
+# button or the /add-dir, /remove-dir and /dirs commands, and are stored in
+# $DSH_HOME/workspace-folders.json. Override this row in your profile's
+# cordis.patch.yml to change the options below (restate every key you keep).
+- insert:
+    - id: workspace-folders
+      name: dsh-workspace-folders
+      config:
+        # Let write/edit calls into a read-write additional directory pass the
+        # sandbox escalation without asking. Shell commands still ask.
+        autoApproveWrites: true
+        # Directories added to every workspace, e.g.
+        #   - { path: /Users/me/notes, access: read-only }
+        globalDirectories: []
