@@ -48,6 +48,7 @@ describe('plugin entry', () => {
     expect(commands).toEqual(['add-dir', 'remove-dir', 'dirs'])
     expect(routes.map(route => route.path)).toEqual([
       '/api/workspace-folders/state', '/api/workspace-folders/save', '/api/workspace-folders/pick', '/api/workspace-folders/browse',
+      '/api/workspace-folders/resolve',
     ])
 
     expect(contexts).toHaveLength(1)

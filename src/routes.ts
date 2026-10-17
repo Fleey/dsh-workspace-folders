@@ -7,6 +7,7 @@
  *   POST /api/workspace-folders/save   { sessionId, directories: [{ path, access }] }
  *   POST /api/workspace-folders/pick   {}   → { path: string | null }
  *   GET  /api/workspace-folders/browse?path=<abs>|sessionId=<id>   → one directory level
+ *   GET  /api/workspace-folders/resolve?sessionId=<id>&path=<typed>  → { path } | { problem }
  *
  * `pick` drives a native Host chooser; `browse` lists one level through a
  * browse-kind chooser for in-app browsing. Both delegate to the composed
@@ -208,6 +209,22 @@ export function folderRoutes(deps: RouteDeps): FetchRouteLike[] {
           }
         }
         return listLevel(capability, undefined, request.signal)
+      }),
+    },
+    {
+      // Checks one typed or picked path when it is added, before the list is
+      // saved: its canonical spelling lets the dialog spot duplicates.
+      path: `${API_PREFIX}/resolve`,
+      methods: ['GET'],
+      requestBody: 'buffered',
+      fetch: request => handle(async () => {
+        const params = new URL(request.url).searchParams
+        const { workspace } = locate(params.get('sessionId'))
+        const typed = params.get('path')
+        if (typed === null || typed.trim() === '') throw new RouteError(400, 'path is required')
+        const validation = deps.folders.validate(workspace, [{ path: resolveInput(typed, workspace), access: 'read-write' }])
+        if (!validation.ok) return { problem: { ...validation.errors[0], path: typed.trim() } }
+        return { path: (validation.entries[0] as { path: string }).path }
       }),
     },
   ]

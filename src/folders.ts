@@ -31,8 +31,11 @@ export interface EffectiveFolder extends FolderEntry {
 
 /** Why one requested folder was refused. */
 export interface FolderProblem {
-  /** `missing`: not an existing directory; `inside-workspace`: already covered by the workspace. */
-  readonly code: 'missing' | 'inside-workspace'
+  /**
+   * `missing`: not an existing directory; `inside-workspace`: already covered
+   * by the workspace; `duplicate`: the same directory is already listed.
+   */
+  readonly code: 'missing' | 'inside-workspace' | 'duplicate'
   /** The path as requested. */
   readonly path: string
 }
@@ -48,9 +51,11 @@ export type FolderValidation =
  * @returns one line of text.
  */
 export function describeProblem(problem: FolderProblem): string {
-  return problem.code === 'missing'
-    ? `not an existing directory: ${problem.path}`
-    : `already inside the workspace: ${problem.path}`
+  switch (problem.code) {
+    case 'missing': return `not an existing directory: ${problem.path}`
+    case 'inside-workspace': return `already inside the workspace: ${problem.path}`
+    case 'duplicate': return `already added: ${problem.path}`
+  }
 }
 
 /** Tools whose escalated writes may be pre-approved; both take `file_path`. */
@@ -102,9 +107,11 @@ export class WorkspaceFolders {
 
   /**
    * Validate a complete requested list for one workspace: every path must be
-   * an existing directory outside the workspace, except that an entry already
-   * stored under the same path is kept while its directory is missing. Paths
-   * are canonicalized and duplicates collapse to their last access.
+   * an existing directory outside the workspace, listed once, and not one of
+   * the global folders. An entry already stored under the same path is kept
+   * while its directory is missing. Paths are compared canonically, so
+   * different spellings of one directory (a trailing slash, `/tmp` and
+   * `/private/tmp`, a symlink) are duplicates.
    * @param workspace - the workspace the list belongs to.
    * @param requested - absolute paths with their access.
    * @param stored - the workspace's current entries.
@@ -117,29 +124,32 @@ export class WorkspaceFolders {
   ): FolderValidation {
     const root = canonicalRoot(workspace)
     const storedPaths = new Set(stored.map(entry => entry.path))
+    const globalPaths = new Set(this.config.globalDirectories.map(entry => entry.path))
     const errors: FolderProblem[] = []
     const entries = new Map<string, FolderEntry>()
     for (const { path, access } of requested) {
       const spelled = trimTrailingSeparators(path)
+      let key: string
       if (storedPaths.has(spelled) && !directoryExists(spelled)) {
-        entries.delete(spelled)
-        entries.set(spelled, { path: spelled, access })
+        key = spelled
+      } else {
+        try {
+          key = trimTrailingSeparators(canonicalDirectory(path))
+        } catch {
+          // canonicalDirectory failed: missing, unreadable, or a file.
+          errors.push({ code: 'missing', path })
+          continue
+        }
+        if (isWithin(key, root)) {
+          errors.push({ code: 'inside-workspace', path })
+          continue
+        }
+      }
+      if (entries.has(key) || globalPaths.has(key)) {
+        errors.push({ code: 'duplicate', path })
         continue
       }
-      let canonical: string
-      try {
-        canonical = canonicalDirectory(path)
-      } catch {
-        // canonicalDirectory failed: missing, unreadable, or a file.
-        errors.push({ code: 'missing', path })
-        continue
-      }
-      if (isWithin(canonical, root)) {
-        errors.push({ code: 'inside-workspace', path })
-        continue
-      }
-      entries.delete(canonical)
-      entries.set(canonical, { path: trimTrailingSeparators(canonical), access })
+      entries.set(key, { path: key, access })
     }
     return errors.length > 0 ? { ok: false, errors } : { ok: true, entries: [...entries.values()] }
   }

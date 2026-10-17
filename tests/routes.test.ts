@@ -34,6 +34,7 @@ describe('routes', () => {
       ['/api/workspace-folders/save', ['POST']],
       ['/api/workspace-folders/pick', ['POST']],
       ['/api/workspace-folders/browse', ['GET']],
+      ['/api/workspace-folders/resolve', ['GET']],
     ])
   })
 
@@ -171,5 +172,32 @@ describe('routes', () => {
     })
     expect((await native.call('/api/workspace-folders/browse')).status).toBe(409)
     expect((await routes({ folders: makeFolders(tree.root) }).call('/api/workspace-folders/browse')).status).toBe(409)
+  })
+
+  it('resolves one added path to its canonical spelling or the reason it is refused', async () => {
+    const tree = tempTree('ws/sub', 'lib')
+    const session: SessionLike = { id: 's1', header: { cwd: tree.path('ws') } }
+    const { call, changed } = routes({ folders: makeFolders(tree.root), sessions: () => ({ get: () => session }) })
+    const resolve = async (path: string) => (await call(`/api/workspace-folders/resolve?sessionId=s1&path=${encodeURIComponent(path)}`)).body
+    expect(await resolve(` ../lib/ `)).toEqual({ ok: true, data: { path: tree.path('lib') } })
+    expect(await resolve('sub')).toEqual({ ok: true, data: { problem: { code: 'inside-workspace', path: 'sub' } } })
+    expect(await resolve('/no/such/dir')).toEqual({ ok: true, data: { problem: { code: 'missing', path: '/no/such/dir' } } })
+    expect((await call('/api/workspace-folders/resolve?sessionId=s1')).status).toBe(400)
+    expect(changed).toEqual([])
+  })
+
+  it('rejects a save that lists one directory twice', async () => {
+    const tree = tempTree('ws', 'lib')
+    const folders = makeFolders(tree.root)
+    const session: SessionLike = { id: 's1', header: { cwd: tree.path('ws') } }
+    const { call } = routes({ folders, sessions: () => ({ get: () => session }) })
+    expect(await call('/api/workspace-folders/save', post({
+      sessionId: 's1',
+      directories: [{ path: tree.path('lib'), access: 'read-write' }, { path: '../lib/', access: 'read-only' }],
+    }))).toEqual({
+      status: 400,
+      body: { ok: false, error: 'some directories are invalid', details: [{ code: 'duplicate', path: tree.path('lib') }] },
+    })
+    expect(folders.store.get(tree.path('ws'))).toEqual([])
   })
 })

@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs'
+import { rmSync, symlinkSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { renderFoldersContext } from '../src/folders.ts'
 import { makeFolders, tempTree } from './helpers.ts'
@@ -24,14 +24,34 @@ describe('WorkspaceFolders', () => {
     const folders = makeFolders(tree.root)
     expect(folders.validate(tree.path('ws'), [
       { path: `${tree.path('lib')}/`, access: 'read-only' },
-      { path: tree.path('lib'), access: 'read-write' },
-    ])).toEqual({ ok: true, entries: [{ path: tree.path('lib'), access: 'read-write' }] })
+    ])).toEqual({ ok: true, entries: [{ path: tree.path('lib'), access: 'read-only' }] })
     expect(folders.validate(tree.path('ws'), [
       { path: tree.path('missing'), access: 'read-write' },
       { path: tree.path('ws/sub'), access: 'read-write' },
     ])).toEqual({
       ok: false,
       errors: [{ code: 'missing', path: tree.path('missing') }, { code: 'inside-workspace', path: tree.path('ws/sub') }],
+    })
+  })
+
+  it('refuses the same directory twice, however it is spelled', () => {
+    const tree = tempTree('ws', 'lib', 'shared')
+    symlinkSync(tree.path('lib'), tree.path('lib-link'))
+    const folders = makeFolders(tree.root, { globalDirectories: [{ path: tree.path('shared'), access: 'read-only' }] })
+    expect(folders.validate(tree.path('ws'), [
+      { path: tree.path('lib'), access: 'read-write' },
+      { path: `${tree.path('lib')}/`, access: 'read-only' },
+      { path: tree.path('lib-link'), access: 'read-only' },
+      { path: `${tree.path('ws')}/../lib`, access: 'read-only' },
+      { path: tree.path('shared'), access: 'read-write' },
+    ])).toEqual({
+      ok: false,
+      errors: [
+        { code: 'duplicate', path: `${tree.path('lib')}/` },
+        { code: 'duplicate', path: tree.path('lib-link') },
+        { code: 'duplicate', path: `${tree.path('ws')}/../lib` },
+        { code: 'duplicate', path: tree.path('shared') },
+      ],
     })
   })
 

@@ -91,7 +91,7 @@ interface ClientContext {
 
 /** One refused directory, as reported by the save route. */
 interface FolderProblem {
-  readonly code: 'missing' | 'inside-workspace'
+  readonly code: 'missing' | 'inside-workspace' | 'duplicate'
   readonly path: string
 }
 
@@ -134,6 +134,8 @@ const STYLE = `
 .wsf-list{display:flex;flex-direction:column;gap:2px}
 .wsf-row{display:flex;align-items:center;gap:8px;min-height:32px;padding:4px 8px;border-radius:var(--dsw-radius-md)}
 .wsf-row:hover{background:var(--dsw-alias-interactive-bg-hover)}
+.wsf-row{transition:background-color .3s}
+.wsf-row.wsf-flash,.wsf-row.wsf-flash:hover{background:var(--dsw-alias-state-warn-bg,rgba(245,166,35,.16))}
 .wsf-path{flex:1;min-width:0;font-family:var(--dsw-font-mono,ui-monospace,monospace);font-size:12px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
 .wsf-tag{flex:none;font-size:11px;line-height:18px;padding:0 6px;border-radius:999px;color:var(--dsw-alias-label-secondary);border:0.5px solid var(--dsw-alias-border-l2)}
 .wsf-tag.wsf-warn{color:var(--dsw-alias-state-warn-primary)}
@@ -272,6 +274,15 @@ function FolderBrowser({ sessionId, onPick, onCancel, t }: {
   )
 }
 
+const PROBLEM_KEYS = {
+  'missing': 'problemMissing',
+  'inside-workspace': 'problemInside',
+  'duplicate': 'problemDuplicate',
+} as const satisfies Record<FolderProblem['code'], FoldersKey>
+
+/** How long a duplicate's existing row stays highlighted. */
+const FLASH_MS = 1600
+
 function loadState(sessionId: string, signal?: AbortSignal): Promise<FolderState> {
   return api<FolderState>(`state?sessionId=${encodeURIComponent(sessionId)}`, signal === undefined ? undefined : { signal })
 }
@@ -306,16 +317,52 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
   const desktopPick = React.useMemo(desktopDirectoryPicker, [])
   const chooser = desktopPick !== undefined ? 'desktop' : state.picker
 
-  const append = (path: string): void => {
-    const trimmed = path.trim()
-    if (trimmed === '') return
-    setDraft(rows => [...rows.filter(row => row.path !== trimmed), { path: trimmed, access: 'read-write', source: 'workspace', exists: true }])
-    setInput('')
+  /** Why the last add was refused; cleared when the input or the list changes. */
+  const [refusal, setRefusal] = React.useState<FolderProblem>()
+  /** Listed row that a refused duplicate points at, highlighted briefly. */
+  const [flash, setFlash] = React.useState<string>()
+  React.useEffect(() => {
+    if (flash === undefined) return
+    const timer = setTimeout(() => setFlash(undefined), FLASH_MS)
+    return () => clearTimeout(timer)
+  }, [flash])
+
+  /**
+   * Resolve one typed or picked path on the Host and refuse it when it is
+   * missing, inside the workspace, or the same directory as a listed row.
+   * @returns the canonical path to add, or undefined after recording the refusal.
+   */
+  const check = async (raw: string): Promise<string | undefined> => {
+    const typed = raw.trim()
+    const query = `sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(typed)}`
+    const result = await api<{ path?: string; problem?: FolderProblem }>(`resolve?${query}`)
+    if (result.problem !== undefined) {
+      setRefusal(result.problem)
+      return undefined
+    }
+    const path = result.path as string
+    if (draft.some(row => row.path === path) || inherited.some(row => row.path === path)) {
+      setRefusal({ code: 'duplicate', path })
+      setFlash(path)
+      return undefined
+    }
+    return path
+  }
+
+  const add = (raw: string): Promise<void> => {
+    if (raw.trim() === '') return Promise.resolve()
+    return run(async () => {
+      const path = await check(raw)
+      if (path === undefined) return
+      setDraft(rows => [...rows, { path, access: 'read-write', source: 'workspace', exists: true }])
+      setInput('')
+    })
   }
 
   const run = async (operation: () => Promise<void>): Promise<void> => {
     setBusy(true)
     setFailure(undefined)
+    setRefusal(undefined)
     try {
       await operation()
     } catch (cause) {
@@ -337,12 +384,17 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
       const path = desktopPick !== undefined
         ? await desktopPick()
         : (await api<{ path: string | null }>('pick', postJson({}))).path
-      if (path !== null) append(path)
+      if (path !== null) await add(path)
     })
   }
 
   const save = (): Promise<void> => run(async () => {
-    const pending = input.trim() === '' ? draft : [...draft, { path: input.trim(), access: 'read-write' as const }]
+    let pending: readonly { path: string; access: FolderAccess }[] = draft
+    if (input.trim() !== '') {
+      const path = await check(input)
+      if (path === undefined) return
+      pending = [...draft, { path, access: 'read-write' }]
+    }
     const next = await api<FolderState>('save', postJson({
       sessionId,
       directories: pending.map(({ path, access }) => ({ path, access })),
@@ -378,7 +430,7 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
             <span className="wsf-tag">{t('primary')}</span>
           </div>
           {inherited.map(folder => (
-            <div className="wsf-row" key={`global:${folder.path}`}>
+            <div className={folder.path === flash ? 'wsf-row wsf-flash' : 'wsf-row'} key={`global:${folder.path}`}>
               <PathText path={folder.path} />
               {!folder.exists && <span className="wsf-tag wsf-warn">{t('missing')}</span>}
               <span className="wsf-tag">{folder.access === 'read-write' ? t('readWrite') : t('readOnly')}</span>
@@ -386,7 +438,7 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
             </div>
           ))}
           {draft.map(folder => (
-            <div className="wsf-row" key={folder.path}>
+            <div className={folder.path === flash ? 'wsf-row wsf-flash' : 'wsf-row'} key={folder.path}>
               <PathText path={folder.path} />
               {!folder.exists && <span className="wsf-tag wsf-warn">{t('missing')}</span>}
               <AccessToggle
@@ -399,7 +451,7 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
                 className="wsf-remove"
                 aria-label={t('remove', { path: folder.path })}
                 title={t('remove', { path: folder.path })}
-                onClick={() => setDraft(rows => rows.filter(row => row.path !== folder.path))}
+                onClick={() => { setRefusal(undefined); setDraft(rows => rows.filter(row => row.path !== folder.path)) }}
               >
                 ×
               </button>
@@ -413,15 +465,15 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
             placeholder={t('placeholder')}
             spellCheck={false}
             data-modal-autofocus=""
-            onChange={event => setInput(event.currentTarget.value)}
+            onChange={(event) => { setRefusal(undefined); setInput(event.currentTarget.value) }}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing && !busy) {
                 event.preventDefault()
-                append(input)
+                void add(input)
               }
             }}
           />
-          <Button variant="outline" onClick={() => append(input)} disabled={busy || input.trim() === ''}>{t('add')}</Button>
+          <Button variant="outline" onClick={() => void add(input)} disabled={busy || input.trim() === ''}>{t('add')}</Button>
           {chooser !== null && (
             <Button variant="outline" onClick={() => void choose()} disabled={busy} aria-expanded={chooser === 'browse' ? browsing : undefined}>
               {t('choose')}
@@ -433,8 +485,11 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
             sessionId={sessionId}
             t={t}
             onCancel={() => setBrowsing(false)}
-            onPick={(path) => { append(path); setBrowsing(false) }}
+            onPick={(path) => { setBrowsing(false); void add(path) }}
           />
+        )}
+        {refusal !== undefined && (
+          <div className="wsf-error" role="alert">{t(PROBLEM_KEYS[refusal.code], { path: refusal.path })}</div>
         )}
         {note !== undefined && <div className="wsf-note">{note}</div>}
         {failure !== undefined && (
@@ -444,7 +499,7 @@ function FoldersDialog({ sessionId, state, onClose, onSaved, t }: {
               <ul>
                 {failure.details.map(detail => (
                   <li key={`${detail.code}:${detail.path}`}>
-                    {t(detail.code === 'missing' ? 'problemMissing' : 'problemInside', { path: detail.path })}
+                    {t(PROBLEM_KEYS[detail.code], { path: detail.path })}
                   </li>
                 ))}
               </ul>

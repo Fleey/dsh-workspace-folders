@@ -78,8 +78,15 @@ export function folderCommands(deps: CommandDeps): Parameters<CommandsLike['regi
         const validation = folders.validate(workspace, [{ path: requested, access }])
         if (!validation.ok) return { kind: 'error', text: validation.errors.map(describeProblem).join('\n') }
         const [added] = validation.entries as [FolderEntry]
-        const others = folders.store.get(workspace).filter(entry => entry.path !== added.path)
-        await folders.store.set(workspace, [...others, added])
+        const current = folders.store.get(workspace)
+        const existing = current.find(entry => entry.path === added.path)
+        if (existing !== undefined) {
+          return {
+            kind: 'error',
+            text: `${describeProblem({ code: 'duplicate', path: added.path })} (${existing.access}). Remove it first to change its access.`,
+          }
+        }
+        await folders.store.set(workspace, [...current, added])
         deps.changed(workspace)
         return { kind: 'success', text: `Added ${added.path} (${access}). It applies from the next turn.` }
       },

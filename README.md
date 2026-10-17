@@ -27,9 +27,10 @@
 
 - **输入框旁的「工作目录」按钮**（📁 +N）：点开后可添加、移除目录，切换「读写 / 只读」。保存后从下一轮对话起生效，本工作区的所有会话共享。
   - 添加目录有两种方式：在输入框里**直接输入**路径（绝对路径或 `~/路径`，回车或点「添加」），或点「**选择文件夹…**」用选择框挑选。
+  - 同一个目录不能重复添加：添加时立即检查，写法不同但指向同一目录（末尾斜杠、`/tmp` 与 `/private/tmp`、符号链接、`~/…`）也算重复，会提示「已在列表中」并高亮已有的那一行；已在工作区内、或已是全局目录的路径同样会被拒绝。
   - 「选择文件夹…」按环境自动选择：在 DSH NEXT / DSH Desktop 窗口里打开系统文件夹对话框（Finder，与添加工作区相同）；在本机 `dsh web` 中由 Host 打开系统对话框；在局域网或远程浏览器中显示应用内文件夹浏览器（从工作区所在目录开始，可点路径跳转、显示隐藏文件夹）。
 - **斜杠命令**（任何有命令入口的界面都可用）：
-  - `/add-dir <路径> [--read-only]` — 添加目录，支持绝对路径、`~/路径`、相对当前工作目录的路径
+  - `/add-dir <路径> [--read-only]` — 添加目录，支持绝对路径、`~/路径`、相对当前工作目录的路径；目录已在列表中时报错（要改读写权限请先 `/remove-dir`）
   - `/remove-dir <路径>` — 移除目录
   - `/dirs` — 列出当前工作区的全部目录
 - **模型可见**：每次请求的运行时上下文（紧跟沙箱策略之后）会列出额外目录及其读写权限；该上下文会写入会话日志，回放时可还原。
@@ -156,7 +157,7 @@ node scripts/smoke-headless.mts <path-to>/@deepseek-ai/dsh/lib/bin.js <deepseek-
 | `src/instructions.ts` | 读取额外目录根部的 `AGENTS.md` / `CLAUDE.md`，生成有字节上限的指令上下文 |
 | `src/approval.ts` | 跟踪提权的 `write`/`edit` 调用，应答匹配的审批请求 |
 | `src/commands.ts` | `/add-dir`、`/remove-dir`、`/dirs` |
-| `src/routes.ts` | `/api/workspace-folders/{state,save,pick,browse}` |
+| `src/routes.ts` | `/api/workspace-folders/{state,save,pick,browse,resolve}` |
 | `src/store.ts` | JSON 存储（原子写入、按顺序串行） |
 | `src/client/index.tsx` | 输入框按钮与对话框 |
 

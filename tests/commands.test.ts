@@ -63,6 +63,20 @@ describe('slash commands', () => {
     expect(changed).toEqual([tree.path('ws'), tree.path('ws'), tree.path('ws')])
   })
 
+  it('refuses to add a directory that is already listed', async () => {
+    const tree = tempTree('ws', 'lib')
+    const folders = makeFolders(tree.root)
+    const { run, changed } = commands(folders)
+    const agent = makeAgent(tree.path('ws'))
+    expect(await run('add-dir', agent, tree.path('lib'))).toMatchObject({ kind: 'success' })
+    expect(await run('add-dir', agent, `${tree.path('lib')}/ --read-only`)).toEqual({
+      kind: 'error',
+      text: `already added: ${tree.path('lib')} (read-write). Remove it first to change its access.`,
+    })
+    expect(folders.store.get(tree.path('ws'))).toEqual([{ path: tree.path('lib'), access: 'read-write' }])
+    expect(changed).toHaveLength(1)
+  })
+
   it('resolves relative paths against the current working directory', async () => {
     const tree = tempTree('ws/app', 'ws-sibling')
     const folders = makeFolders(tree.root)
